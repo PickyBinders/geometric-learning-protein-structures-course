@@ -20,7 +20,7 @@ def load_graph(pdb_id, chain):
     graph_config = ProteinGraphConfig(
         node_metadata_functions = [graphein_nodes.amino_acid_one_hot, graphein_nodes.meiler_embedding],
         edge_construction_functions = [graphein_edges.add_peptide_bonds, 
-                                       partial(graphein_edges.add_distance_threshold, long_interaction_threshold=2)],
+                                       partial(graphein_edges.add_distance_threshold, threshold=8., long_interaction_threshold=2)],
     )
     graph = construct_graph(pdb_code=pdb_id, config=graph_config, verbose=False)
     interface_residues = set()
@@ -43,10 +43,7 @@ def graphein_to_torch_graph(graphein_graph, interface_labels, convertor,
     data_dict= data.to_dict()
     x_data = []
     for x in node_attr_columns:
-        if data_dict[x].ndim == 1:
-            x_data.append(torch.atleast_2d(data_dict[x]).T)
-        else:
-            x_data.append(torch.atleast_2d(data_dict[x]))
+        x_data.append(torch.atleast_2d(data_dict[x]))
     data.x = torch.hstack(x_data).float()
     data.pos = data.coords.float()
     data.y = torch.zeros(data.num_nodes)
@@ -54,8 +51,6 @@ def graphein_to_torch_graph(graphein_graph, interface_labels, convertor,
         if node_id in interface_labels:
             data.y[i] = 1
     return data
-
-
 
 class ProteinDataset(Dataset):
     """
@@ -65,7 +60,6 @@ class ProteinDataset(Dataset):
                  protein_names: list, 
                  pre_transform=None, 
                  transform=None):
-        self.protein_names = protein_names
         columns = [
             "chain_id",
             "coords",
@@ -76,35 +70,43 @@ class ProteinDataset(Dataset):
             "amino_acid_one_hot",
             "meiler"
         ]
-
         self.convertor = GraphFormatConvertor(src_format="nx", dst_format="pyg", columns=columns, verbose = None)
+        self.protein_names = protein_names
         super(ProteinDataset, self).__init__(root, pre_transform=pre_transform, transform=transform)
 
     def download(self):
         for protein_name in self.protein_names:
+            print(protein_name)
             output = Path(self.raw_dir) / f'{protein_name}.pkl'
             if not output.exists():
-                pdb_id, chain = protein_name.split("_")
-                graphein_graph, interface_labels = load_graph(pdb_id, chain)
-                with open(output, "wb") as f:
-                    pickle.dump((graphein_graph, interface_labels), f)
+                try:
+                    pdb_id, chain = protein_name.split("_")
+                    graphein_graph, interface_labels = dataloader.load_graph(pdb_id, chain)
+                    with open(output, "wb") as f:
+                        pickle.dump((graphein_graph, interface_labels), f)
+                    successful_protein_names.append(protein_name)
+                except Exception as e:
+                    print(f"Cannot load {protein_name} because of {e}")
 
     @property
     def raw_file_names(self):
-        return [Path(self.raw_dir) / f"{protein_name}.pkl" for protein_name in self.protein_names]
+        return [Path(self.raw_dir) / f"{protein_name}.pkl" for protein_name in self.protein_names if (Path(self.raw_dir) / f"{protein_name}.pt").exists()]
 
     @property
     def processed_file_names(self):
-        return [Path(self.processed_dir) / f"{protein_name}.pt" for protein_name in self.protein_names]
+        return [Path(self.processed_dir) / f"{protein_name}.pt" for protein_name in self.protein_names if (Path(self.processed_dir) / f"{protein_name}.pt").exists()]
 
     def process(self):
         for protein_name in self.protein_names:
             output = Path(self.processed_dir) / f'{protein_name}.pt'
             if output.exists():
                 continue
-            with open(Path(self.raw_dir) / f"{protein_name}.pkl", "rb") as f:
+            raw = Path(self.raw_dir) / f"{protein_name}.pkl"
+            if not raw.exists():
+                continue
+            with open(raw, "rb") as f:
                 graphein_graph, interface_labels = pickle.load(f)
-            torch_graph = graphein_to_torch_graph(graphein_graph, interface_labels, self.convertor)
+            torch_graph = graphein_to_torch_graph(graphein_graph, interface_labels, convertor=self.convertor)
             if self.pre_transform is not None:
                 torch_graph = self.pre_transform(torch_graph)
             torch.save(torch_graph, output)
@@ -115,9 +117,6 @@ class ProteinDataset(Dataset):
     def get(self, idx):
         data = torch.load(self.processed_file_names[idx])
         return data
-
-
-
 
 class ProteinGraphDataModule(L.LightningDataModule):
     def __init__(self, root, dataset_file, batch_size=8, num_workers=4, pre_transform=None, transform=None):
