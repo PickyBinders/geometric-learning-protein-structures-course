@@ -12,7 +12,7 @@ from torch_geometric.loader import DataLoader
 from pathlib import Path
 import pickle
 import torch
-import lightning as L
+import lightning
 from torch.utils.data import random_split
 
 
@@ -54,8 +54,6 @@ def graphein_to_torch_graph(graphein_graph, interface_labels, convertor,
         if node_id in interface_labels:
             data.y[i] = 1
     return data
-
-
 
 class ProteinDataset(Dataset):
     """
@@ -117,9 +115,7 @@ class ProteinDataset(Dataset):
         return data
 
 
-
-
-class ProteinGraphDataModule(L.LightningDataModule):
+class ProteinGraphDataModule(lightning.LightningDataModule):
     def __init__(self, root, dataset_file, batch_size=8, num_workers=4, pre_transform=None, transform=None):
         super().__init__()
         self.root = root
