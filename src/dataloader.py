@@ -136,9 +136,9 @@ class ProteinGraphDataModule(L.LightningDataModule):
         # only called on 1 GPU/TPU in distributed settings
         # does the downloading and saving of graphein graphs part, just once
         ProteinDataset(root=self.root,
-                                  protein_names=self.protein_names,
-                                  pre_transform=self.pre_transform, 
-                                  transform=self.transform)
+                        protein_names=self.protein_names,
+                        pre_transform=self.pre_transform, 
+                        transform=self.transform)
     
 
     def setup(self, stage):
