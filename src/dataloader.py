@@ -16,8 +16,6 @@ import lightning as L
 from torch.utils.data import random_split
 from Bio.PDB.mmtf import MMTFParser
 from Bio.PDB.SASA import ShrakeRupley
-import warnings
-warnings.filterwarnings("ignore", category=FutureWarning)
 
 
 def load_graph(pdb_id, chain):
@@ -75,25 +73,20 @@ class ProteinDataset(Dataset):
     """
     def __init__(self, root,
                  protein_names: list,
-                 columns: list, 
-                 pre_transform=None, 
-                 transform=None):
+                 columns: list):
 
         self.convertor = GraphFormatConvertor(src_format="nx", dst_format="pyg", columns=columns, verbose = None)
         self.protein_names = protein_names
-        super(ProteinDataset, self).__init__(root, pre_transform=pre_transform, transform=transform)
+        super(ProteinDataset, self).__init__(root)
 
     def download(self):
         for protein_name in self.protein_names:
             output = Path(self.raw_dir) / f'{protein_name}.pkl'
             if not output.exists():
-                try:
-                    pdb_id, chain = protein_name.split("_")
-                    graphein_graph, interface_labels = load_graph(pdb_id, chain)
-                    with open(output, "wb") as f:
-                        pickle.dump((graphein_graph, interface_labels), f)
-                except Exception as e:
-                    print(f"Cannot load {protein_name} because of {e}")
+                pdb_id, chain = protein_name.split("_")
+                graphein_graph, interface_labels = load_graph(pdb_id, chain)
+                with open(output, "wb") as f:
+                    pickle.dump((graphein_graph, interface_labels), f)
 
     @property
     def raw_file_names(self):
@@ -106,17 +99,11 @@ class ProteinDataset(Dataset):
     def process(self):
         for protein_name in self.protein_names:
             output = Path(self.processed_dir) / f'{protein_name}.pt'
-            if output.exists():
-                continue
-            raw = Path(self.raw_dir) / f"{protein_name}.pkl"
-            if not raw.exists():
-                continue
-            with open(raw, "rb") as f:
-                graphein_graph, interface_labels = pickle.load(f)
-            torch_graph = graphein_to_torch_graph(graphein_graph, interface_labels, convertor=self.convertor)
-            if self.pre_transform is not None:
-                torch_graph = self.pre_transform(torch_graph)
-            torch.save(torch_graph, output)
+            if not output.exists():
+                with open(Path(self.raw_dir) / f"{protein_name}.pkl", "rb") as f:
+                    graphein_graph, interface_labels = pickle.load(f)
+                torch_graph = graphein_to_torch_graph(graphein_graph, interface_labels, convertor=self.convertor)
+                torch.save(torch_graph, output)
 
     def len(self):
         return len(self.processed_file_names)
@@ -126,7 +113,7 @@ class ProteinDataset(Dataset):
         return data
 
 class ProteinGraphDataModule(L.LightningDataModule):
-    def __init__(self, root, columns, dataset_file, batch_size=8, num_workers=4, pre_transform=None, transform=None):
+    def __init__(self, root, columns, dataset_file, batch_size=8, num_workers=4):
         super().__init__()
         self.root = root
         self.dataset_file = dataset_file
@@ -134,9 +121,7 @@ class ProteinGraphDataModule(L.LightningDataModule):
         self.num_workers = num_workers
         with open(dataset_file) as f:
             self.protein_names = [line.strip() for line in f]
-        self.protein_names = self.protein_names[:64]
-        self.pre_transform = pre_transform
-        self.transform = transform
+        self.protein_names = self.protein_names[:100]
         self.columns = columns
 
     def prepare_data(self):
@@ -145,9 +130,7 @@ class ProteinGraphDataModule(L.LightningDataModule):
         # does the downloading and saving of graphein graphs part, just once
         ProteinDataset(root=self.root,
                         protein_names=self.protein_names,
-                        columns=self.columns,
-                        pre_transform=self.pre_transform, 
-                        transform=self.transform)
+                        columns=self.columns)
     
 
     def setup(self, stage):
@@ -156,9 +139,7 @@ class ProteinGraphDataModule(L.LightningDataModule):
         # now it's just loaded and not downloaded processed etc.
         dataset = ProteinDataset(root=self.root,
                                   protein_names=self.protein_names,
-                                  columns=self.columns,
-                                  pre_transform=self.pre_transform, 
-                                  transform=self.transform)
+                                  columns=self.columns)
         train_idx, val_idx, test_idx = random_split(range(len(dataset)), [0.8, 0.1, 0.1])
         self.train, self.val, self.test = dataset[list(train_idx)], dataset[list(val_idx)], dataset[list(test_idx)]
 
