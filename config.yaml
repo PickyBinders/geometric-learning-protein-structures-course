@@ -25,11 +25,11 @@ data:
       - amino_acid_one_hot
     batch_size: 32
     num_workers: 4
-# optimizer:
-#   class_path: torch.optim.Adam
-#   init_args:
-#     lr: 0.001
-#     weight_decay: 0.0001
+optimizer:
+  class_path: torch.optim.Adam
+  init_args:
+    lr: 0.001
+    weight_decay: 0.0001
 trainer:
   logger:
     - class_path: lightning.pytorch.loggers.TensorBoardLogger
